@@ -8,8 +8,8 @@ import { Simulator } from '../server/simulator.mjs';
 function fixture() {
   let now = 1000; const c = new Controller(() => now);
   c.addClient('alice', 'Алиса'); c.addClient('bob', 'Борис'); c.claim('alice'); let seq = 0;
-  const command = (values = {}, extra = {}) => c.command('alice', { epoch: c.epoch, seq: ++seq, issuedAt: now, deadman: false, values: { ...neutral(), ...values }, ...extra });
-  return { c, advance: ms => { now += ms; c.tick(); }, command, arm: () => { command(); c.arm('alice', c.epoch); } };
+  const command = (values = {}, extra = {}) => c.command('alice', { epoch: c.epoch, safetyEpoch: c.safetyEpoch, seq: ++seq, issuedAt: now, deadman: false, values: { ...neutral(), ...values }, ...extra });
+  return { c, advance: ms => { now += ms; c.tick(); }, command, arm: () => { command(); c.arm('alice', c.epoch, c.safetyEpoch); } };
 }
 test('only one operator, spectator cannot arm or send thrust', () => {
   const { c } = fixture(); assert.throws(() => c.claim('bob'));
@@ -36,11 +36,11 @@ test('lease timeout releases ownership and makes old credentials unusable', () =
 test('takeover is requested, accepted by owner and starts disarmed with new epoch', () => {
   const { c, arm, command } = fixture(); arm(); command({ heave: 1 }, { deadman: true }); const epoch = c.epoch;
   c.takeover('bob'); assert.equal(c.owner, 'alice'); assert.throws(() => c.respond('bob', true));
-  c.respond('alice', true); assert.equal(c.owner, 'bob'); assert.equal(c.armed, false); assert.notEqual(c.epoch, epoch);
+  c.respond('alice', true, c.request.requestId); assert.equal(c.owner, 'bob'); assert.equal(c.armed, false); assert.notEqual(c.epoch, epoch);
   assert.ok(c.packet().thrusters.every(x => x === 0)); assert.throws(() => c.arm('bob', c.epoch));
 });
 test('declined and expired takeover cannot steal control', () => {
-  const { c, command, advance } = fixture(); c.takeover('bob'); c.respond('alice', false); assert.equal(c.request, null);
+  const { c, command, advance } = fixture(); c.takeover('bob'); c.respond('alice', false, c.request.requestId); assert.equal(c.request, null);
   c.takeover('bob'); for (let i = 0; i < 16; i++) { command(); advance(1000); }
   assert.equal(c.request, null); assert.throws(() => c.respond('alice', true)); assert.equal(c.owner, 'alice');
 });
@@ -48,12 +48,12 @@ test('any participant can latch emergency stop, only neutral operator can reset'
   const { c, arm, command } = fixture(); arm(); command({ surge: 1 }, { deadman: true }); c.emergency('bob');
   assert.equal(c.estop, true); assert.equal(c.armed, false); assert.ok(c.packet().thrusters.every(x => x === 0));
   assert.throws(() => c.reset('bob')); assert.throws(() => c.reset('alice')); assert.throws(() => c.arm('alice', c.epoch));
-  command(); c.reset('alice'); assert.equal(c.estop, false); assert.equal(c.armed, false);
+  command(); c.reset('alice', c.safetyEpoch); assert.equal(c.estop, false); assert.equal(c.armed, false);
 });
 test('missing epoch and packets from a previous lease are rejected', () => {
   const { c, command } = fixture(); const old = c.epoch; c.release('alice'); c.claim('alice');
   assert.throws(() => command({}, { epoch: old })); assert.throws(() => command({}, { epoch: undefined }));
-  assert.throws(() => c.arm('alice')); command(); c.arm('alice', c.epoch); assert.equal(c.armed, true);
+  assert.throws(() => c.arm('alice')); command(); c.arm('alice', c.epoch, c.safetyEpoch); assert.equal(c.armed, true);
 });
 test('malformed, unknown, nonfinite, stale, future and replayed commands fail validation', () => {
   const { c, command } = fixture();

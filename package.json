@@ -1,5 +1,5 @@
 {
-  "name": "rov-control", "version": "0.1.0", "private": true, "type": "module",
+  "name": "rov-control", "version": "0.1.1", "private": true, "type": "module",
   "description": "Локальная станция управления ТНПА с серверным арбитражем и симулятором",
   "engines": { "node": ">=22" },
   "scripts": { "start": "node server/index.mjs", "dev": "node --watch server/index.mjs", "test": "node --test" }
