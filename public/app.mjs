@@ -1,9 +1,22 @@
-import { actions, defaultProfile, validateProfile } from '/shared/actions.mjs';
-import { InputMapper } from '/shared/input.mjs';
-import { createScene } from '/scene.mjs';
-import { ownsControl, acceptsState, commandContext } from '/shared/session.mjs';
+import { actions, defaultProfile, validateProfile } from './shared/actions.mjs';
+import { InputMapper } from './shared/input.mjs';
+import { createScene } from './scene.mjs';
+import { ownsControl, acceptsState, commandContext } from './shared/session.mjs';
+import { demoMode } from './runtime.mjs';
+import { createDemoTransport } from './demo-transport.mjs';
 
 const $ = id => document.getElementById(id);
+const demoTransport = demoMode ? createDemoTransport() : null;
+const stationFetch = demoTransport ? demoTransport.fetch.bind(demoTransport) : fetch;
+if (demoMode) {
+  const notice = document.createElement('div'); notice.className = 'notice demo-notice';
+  notice.append('GITHUB PAGES · ДЕМО. Код входа: 1. ' + (demoTransport.shared ? 'Один симулятор для вкладок этого браузера. ' : 'В этом браузере каждая вкладка запускает отдельный симулятор. ') + 'На разных устройствах демонстрации независимы. ');
+  const link = document.createElement('a'); link.href = './'; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Открыть вторую вкладку ↗'; notice.append(link);
+  document.querySelector('main').prepend(notice);
+  document.querySelector('.top-status .badge').textContent = 'WEB-ДЕМО';
+  $('login-dialog').querySelector('h2').textContent = 'Войти в демонстрацию';
+  document.querySelector('label[for="login-pin"]').textContent = 'Демонстрационный код: 1'; $('login-pin').value = '1';
+}
 let profile = defaultProfile();
 try { const saved = localStorage.getItem('arctica.profile'); if (saved) profile = validateProfile(JSON.parse(saved)); } catch { /* Invalid saved profiles fall back to safe defaults. */ }
 let token = sessionStorage.getItem('arctica.token'); let state = null, connected = false, lastStateAt = 0, seq = 0;
@@ -22,7 +35,7 @@ function readableKey(code) { return code?.replace(/^Key/, '').replace(/^Digit/, 
 async function api(path, data, { quiet = false, signal } = {}) {
   const begin = performance.now(), requestToken = token;
   try {
-    const response = await fetch('/api/' + path, { method: data === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: data === undefined ? undefined : JSON.stringify(data), signal: signal || AbortSignal.timeout(2000) });
+    const response = await stationFetch('/api/' + path, { method: data === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: data === undefined ? undefined : JSON.stringify(data), signal: signal || AbortSignal.timeout(2000) });
     const result = await response.json();
     if (path !== 'login' && requestToken !== token) throw new DOMException('Сеанс изменился', 'AbortError');
     if (!response.ok) {
@@ -30,7 +43,7 @@ async function api(path, data, { quiet = false, signal } = {}) {
       if (response.status === 401 && path !== 'login') { token = null; sessionStorage.removeItem('arctica.token'); showLogin(); }
       throw Error(result.error || 'Ошибка запроса');
     }
-    if (result.serverTime !== undefined) { receive(result); text('footer-status', 'СВЯЗЬ ' + Math.round(performance.now() - begin) + ' мс · ВЕРХНИЙ БЛОК'); }
+    if (result.serverTime !== undefined) { receive(result); text('footer-status', demoMode ? 'ДЕМОНСТРАЦИЯ · СИМУЛЯЦИЯ В БРАУЗЕРЕ' : 'СВЯЗЬ ' + Math.round(performance.now() - begin) + ' мс · ВЕРХНИЙ БЛОК'); }
     return result;
   } catch (error) { if (!quiet && error.name !== 'AbortError') toast(error.message); throw error; }
 }
@@ -48,7 +61,7 @@ function receive(next) {
 }
 function setConnection(value) {
   connected = value; $('connection-dot').style.background = value ? 'var(--accent)' : 'var(--red)';
-  text('connection-text', value ? 'Станция на связи' : 'Нет связи'); $('connection-alert').hidden = value || !state;
+  text('connection-text', value ? (demoMode ? 'Демо активно' : 'Станция на связи') : 'Нет связи'); $('connection-alert').hidden = value || !state;
   if (!value) text('footer-status', 'СВЯЗЬ ПОТЕРЯНА');
   else if ($('footer-status').textContent === 'СВЯЗЬ ПОТЕРЯНА' || $('footer-status').textContent === 'Ожидание подключения') text('footer-status', 'СВЯЗЬ АКТИВНА · ВЕРХНИЙ БЛОК');
   if (!value) { keys.clear(); inputMapper.reset(); $('arm').disabled = true; $('light-toggle').disabled = true; }
@@ -56,7 +69,7 @@ function setConnection(value) {
 async function connect() {
   clearTimeout(reconnectTimer); streamAbort?.abort(); const abort = new AbortController(); streamAbort = abort; const streamToken = token;
   try {
-    const response = await fetch('/api/events', { headers: { Authorization: 'Bearer ' + token }, signal: abort.signal });
+    const response = await stationFetch('/api/events', { headers: { Authorization: 'Bearer ' + token }, signal: abort.signal });
     if (streamToken !== token) return;
     if (!response.ok) {
       if (response.status === 401 || response.status === 409) {
@@ -87,7 +100,7 @@ $('login-form').addEventListener('submit', async event => {
   event.preventDefault(); text('login-error', '');
   try {
     const result = await api('login', { name: $('login-name').value, pin: $('login-pin').value }, { quiet: true });
-    token = result.token; sessionStorage.setItem('arctica.token', token); $('login-pin').value = '';
+    token = result.token; sessionStorage.setItem('arctica.token', token); $('login-pin').value = demoMode ? '1' : '';
     const requestedName = $('login-name').value; $('login-name').value = result.name;
     localStorage.setItem('arctica.name', result.name); text('user-button', result.name.slice(0, 1).toUpperCase()); $('user-button').title = 'Вы вошли как ' + result.name + ' · выйти';
     if (result.name !== requestedName.trim()) toast('Ваше имя: ' + result.name);

@@ -5,6 +5,7 @@ import { randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto
 import { Readable } from 'node:stream';
 import { Controller, ControlError } from './controller.mjs';
 import { Simulator } from './simulator.mjs';
+import { applyStationCommand } from '../shared/commands.mjs';
 
 export const generateAccessPin = () => String(randomInt(0, 10));
 
@@ -73,30 +74,15 @@ export function createStation({ accessPin = '', cameraUrl = '', clock } = {}) {
         }
         if (req.method !== 'POST') throw new ControlError('Маршрут не найден', 404);
         const data = await json(req);
-        if (['/api/release', '/api/respond', '/api/disarm', '/api/reset', '/api/mark'].includes(url.pathname)) controller.requireLease(id, data.epoch);
-        switch (url.pathname) {
-          case '/api/claim': controller.claim(id); break;
-          case '/api/release': controller.release(id); break;
-          case '/api/takeover': controller.takeover(id); break;
-          case '/api/respond': if (typeof data.accept !== 'boolean') throw new ControlError('Ожидается accept', 400); controller.respond(id, data.accept, data.requestId); break;
-          case '/api/cancel-takeover': controller.cancelTakeover(id, data.requestId); break;
-          case '/api/heartbeat': controller.heartbeat(id, data.epoch); break;
-          case '/api/command': controller.command(id, data); break;
-          case '/api/arm': controller.arm(id, data.epoch, data.safetyEpoch); break;
-          case '/api/disarm': controller.disarm(id); break;
-          case '/api/estop': controller.emergency(id); break;
-          case '/api/reset': controller.reset(id, data.safetyEpoch); break;
-          case '/api/mark': {
-            controller.requireOwner(id);
-            if (typeof data.text !== 'string' || data.text.length > 200 || !data.text.trim()) throw new ControlError('Введите отметку до 200 символов', 400);
-            controller.event('Отметка: ' + data.text.trim()); break;
-          }
-          case '/api/logout': for (const [stream, s] of streams) if (s.id === id) { streams.delete(stream); stream.end(); } controller.removeClient(id); sessions.delete(token); break;
-          default: throw new ControlError('Маршрут не найден', 404);
-        }
+        if (url.pathname === '/api/logout') {
+          for (const [stream, s] of streams) if (s.id === id) { streams.delete(stream); stream.end(); }
+          controller.removeClient(id); sessions.delete(token);
+        } else applyStationCommand(controller, id, url.pathname.slice('/api/'.length), data);
         return send(res, 200, state(id));
       }
       const files = { '/': ['public/index.html', 'text/html; charset=utf-8'], '/app.mjs': ['public/app.mjs', 'text/javascript'], '/scene.mjs': ['public/scene.mjs', 'text/javascript'], '/styles.css': ['public/styles.css', 'text/css'], '/shared/actions.mjs': ['shared/actions.mjs', 'text/javascript'], '/shared/input.mjs': ['shared/input.mjs', 'text/javascript'], '/shared/session.mjs': ['shared/session.mjs', 'text/javascript'] };
+      for (const name of ['runtime', 'demo-transport', 'demo-worker']) files['/' + name + '.mjs'] = ['public/' + name + '.mjs', 'text/javascript'];
+      for (const name of ['controller', 'vehicle', 'simulator', 'commands', 'demo-station']) files['/shared/' + name + '.mjs'] = ['shared/' + name + '.mjs', 'text/javascript'];
       const target = files[url.pathname]; if (!target || req.method !== 'GET') throw new ControlError('Страница не найдена', 404);
       const body = await readFile(new URL('../' + target[0], import.meta.url)); res.writeHead(200, { 'Content-Type': target[1] }); res.end(body);
     } catch (e) { if (!res.headersSent) send(res, e.status || 500, { error: e.status ? e.message : 'Ошибка станции', ...(authenticatedId && controller.clients.has(authenticatedId) ? { state: state(authenticatedId) } : {}) }); else res.end(); }
