@@ -81,8 +81,8 @@ export function createStation({ accessPin = '', cameraUrl = '', clock } = {}) {
         return send(res, 200, state(id));
       }
       const files = { '/': ['public/index.html', 'text/html; charset=utf-8'], '/app.mjs': ['public/app.mjs', 'text/javascript'], '/scene.mjs': ['public/scene.mjs', 'text/javascript'], '/styles.css': ['public/styles.css', 'text/css'], '/shared/actions.mjs': ['shared/actions.mjs', 'text/javascript'], '/shared/input.mjs': ['shared/input.mjs', 'text/javascript'], '/shared/session.mjs': ['shared/session.mjs', 'text/javascript'] };
-      for (const name of ['runtime', 'demo-transport', 'demo-worker']) files['/' + name + '.mjs'] = ['public/' + name + '.mjs', 'text/javascript'];
-      for (const name of ['controller', 'vehicle', 'simulator', 'commands', 'demo-station']) files['/shared/' + name + '.mjs'] = ['shared/' + name + '.mjs', 'text/javascript'];
+      for (const name of ['runtime', 'demo-transport', 'demo-worker', 'touch']) files['/' + name + '.mjs'] = ['public/' + name + '.mjs', 'text/javascript'];
+      for (const name of ['controller', 'vehicle', 'simulator', 'commands', 'demo-station', 'touch-input']) files['/shared/' + name + '.mjs'] = ['shared/' + name + '.mjs', 'text/javascript'];
       const target = files[url.pathname]; if (!target || req.method !== 'GET') throw new ControlError('Страница не найдена', 404);
       const body = await readFile(new URL('../' + target[0], import.meta.url)); res.writeHead(200, { 'Content-Type': target[1] }); res.end(body);
     } catch (e) { if (!res.headersSent) send(res, e.status || 500, { error: e.status ? e.message : 'Ошибка станции', ...(authenticatedId && controller.clients.has(authenticatedId) ? { state: state(authenticatedId) } : {}) }); else res.end(); }

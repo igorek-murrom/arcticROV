@@ -35,7 +35,7 @@ test('HTTP: authenticated clients, arbitration, commands, emergency stop and sta
   assert.equal((await request('reset', {}, a.token)).status, 403);
   assert.equal((await request('camera', undefined, a.token)).status, 404);
   const page = await fetch(base); assert.equal(page.status, 200); assert.match(await page.text(), /АРКТИКА/);
-  for (const asset of ['/app.mjs', '/scene.mjs', '/styles.css', '/shared/actions.mjs', '/shared/input.mjs', '/shared/session.mjs']) assert.equal((await fetch(base + asset)).status, 200);
+  for (const asset of ['/app.mjs', '/scene.mjs', '/touch.mjs', '/styles.css', '/shared/actions.mjs', '/shared/input.mjs', '/shared/touch-input.mjs', '/shared/session.mjs']) assert.equal((await fetch(base + asset)).status, 200);
   assert.equal((await fetch(base + '/server/index.mjs')).status, 404);
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
 });

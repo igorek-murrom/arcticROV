@@ -16,7 +16,7 @@ export function defaultProfile() {
     bindings: Object.fromEntries(actions.map(a => [a.id, { negative: a.negative || '', positive: a.positive || '', axis: a.padAxis ?? -1, buttonNegative: a.padNegative ?? -1, buttonPositive: a.padPositive ?? -1, invert: !!a.invert }])) };
 }
 export function validateProfile(p) {
-  if (!p || p.version !== 1 || !['keyboard', 'gamepad'].includes(p.device)) throw Error('Неизвестный формат профиля');
+  if (!p || p.version !== 1 || !['keyboard', 'gamepad', 'touch'].includes(p.device)) throw Error('Неизвестный формат профиля');
   for (const [key, low, high] of [['deadzone', 0, 0.5], ['sensitivity', 0.1, 1], ['expo', 0, 1]])
     if (typeof p[key] !== 'number' || !Number.isFinite(p[key]) || p[key] < low || p[key] > high) throw Error('Недопустимый параметр ' + key);
   if (!validKey(p.deadmanKey) || !Number.isInteger(p.deadmanButton) || p.deadmanButton < 0 || p.deadmanButton > 63) throw Error('Неверная кнопка разрешения');

@@ -5,7 +5,7 @@ export class InputMapper {
   constructor() { this.reset(); }
   reset() { this.toggles = {}; this.held = {}; }
   toggle(id) { this.toggles[id] = this.toggles[id] ? 0 : 1; }
-  sample(profile, { keys = new Set(), pad = null, active = true, allowToggles = true } = {}) {
+  sample(profile, { keys = new Set(), pad = null, touch = null, active = true, allowToggles = true } = {}) {
     const values = neutral(); let deadman = false;
     if (!active) return { values, deadman };
     if (profile.device === 'keyboard') {
@@ -14,6 +14,9 @@ export class InputMapper {
         const b = profile.bindings[a.id];
         values[a.id] = (Number(keys.has(b.positive)) - Number(keys.has(b.negative))) * profile.sensitivity;
       }
+    } else if (profile.device === 'touch') {
+      deadman = !!touch?.deadman;
+      for (const a of axisActions) values[a.id] = shape(touch?.values[a.id] || 0, profile.deadzone, profile.expo) * profile.sensitivity;
     } else if (pad) {
       deadman = !!pad.buttons[profile.deadmanButton]?.pressed;
       for (const a of axisActions) {
@@ -24,7 +27,7 @@ export class InputMapper {
     }
     for (const a of actions.filter(a => a.kind === 'toggle')) {
       const b = profile.bindings[a.id];
-      const pressed = profile.device === 'keyboard' ? keys.has(b.positive) : !!pad?.buttons[b.buttonPositive]?.pressed;
+      const pressed = profile.device === 'keyboard' ? keys.has(b.positive) : profile.device === 'gamepad' && !!pad?.buttons[b.buttonPositive]?.pressed;
       if (pressed && !this.held[a.id] && allowToggles) this.toggle(a.id);
       this.held[a.id] = pressed; values[a.id] = allowToggles ? (this.toggles[a.id] || 0) : 0;
     }

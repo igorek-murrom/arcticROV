@@ -1,5 +1,6 @@
 import { actions, defaultProfile, validateProfile } from './shared/actions.mjs';
 import { InputMapper } from './shared/input.mjs';
+import { createTouchControls } from './touch.mjs';
 import { createScene } from './scene.mjs';
 import { ownsControl, acceptsState, commandContext } from './shared/session.mjs';
 import { demoMode } from './runtime.mjs';
@@ -18,10 +19,17 @@ if (demoMode) {
   document.querySelector('label[for="login-pin"]').textContent = 'Демонстрационный код: 1'; $('login-pin').value = '1';
 }
 let profile = defaultProfile();
-try { const saved = localStorage.getItem('arctica.profile'); if (saved) profile = validateProfile(JSON.parse(saved)); } catch { /* Invalid saved profiles fall back to safe defaults. */ }
+try { const saved = localStorage.getItem('arctica.profile'); if (saved) profile = validateProfile(JSON.parse(saved));
+  else if (matchMedia('(pointer: coarse)').matches) profile.device = 'touch'; } catch { /* Invalid saved profiles fall back to safe defaults. */ }
 let token = sessionStorage.getItem('arctica.token'); let state = null, connected = false, lastStateAt = 0, seq = 0;
 let keys = new Set(), capture = null, sending = false, cameraConfigured = null;
 const inputMapper = new InputMapper();
+const touchControls = createTouchControls($('touch-controls'), {
+  allowed: () => profile.device === 'touch' && isOwner() && !outputBusy && currentTab === 'pilot' && !document.hidden && !document.querySelector('dialog[open]') && !state.estop,
+  onCancel: () => { if (isOwner() && (state.armed || outputBusy)) void safeDisarm(); },
+  onPress: control => { if (control === 'light' && state.armed) inputMapper.toggle('light'); }
+});
+function clearInput() { keys.clear(); inputMapper.reset(); touchControls.reset(); }
 let currentTab = 'pilot', streamAbort = null, commandAbort = null, reconnectTimer = null, toastTimer;
 let outputBusy = false, outputAction = 0, ownershipBusy = false, heartbeatBusy = false;
 const started = Date.now(), samples = [], depthHistory = [], recordedEvents = new Map();
@@ -53,7 +61,7 @@ function receive(next) {
   state = next; connected = true; lastStateAt = performance.now();
   if (state.name) { text('user-button', state.name.slice(0, 1).toUpperCase()); $('user-button').title = 'Вы вошли как ' + state.name + ' · выйти'; }
   if (previousOwner !== state.owner?.id || previousEpoch !== state.epoch) seq = 0;
-  if (previousOwner !== state.owner?.id || previousEpoch !== state.epoch || previousSafety !== state.safetyEpoch) { keys.clear(); inputMapper.reset(); commandAbort?.abort(); }
+  if (previousOwner !== state.owner?.id || previousEpoch !== state.epoch || previousSafety !== state.safetyEpoch) { clearInput(); commandAbort?.abort(); }
   if (isOwner()) seq = Math.max(seq, state.lastCommandSeq);
   setConnection(true);
   for (const event of state.events) recordedEvents.set(event.time + event.text, event);
@@ -64,7 +72,7 @@ function setConnection(value) {
   text('connection-text', value ? (demoMode ? 'Демо активно' : 'Станция на связи') : 'Нет связи'); $('connection-alert').hidden = value || !state;
   if (!value) text('footer-status', 'СВЯЗЬ ПОТЕРЯНА');
   else if ($('footer-status').textContent === 'СВЯЗЬ ПОТЕРЯНА' || $('footer-status').textContent === 'Ожидание подключения') text('footer-status', 'СВЯЗЬ АКТИВНА · ВЕРХНИЙ БЛОК');
-  if (!value) { keys.clear(); inputMapper.reset(); $('arm').disabled = true; $('light-toggle').disabled = true; }
+  if (!value) { clearInput(); touchControls.setEnabled(false); $('touch-arm').disabled = true; $('arm').disabled = true; $('light-toggle').disabled = true; }
 }
 async function connect() {
   clearTimeout(reconnectTimer); streamAbort?.abort(); const abort = new AbortController(); streamAbort = abort; const streamToken = token;
@@ -112,8 +120,9 @@ $('user-button').onclick = async () => { try { await api('logout', {}); } catch 
 try { const name = localStorage.getItem('arctica.name'); if (name) { $('login-name').value = name; text('user-button', name.slice(0, 1).toUpperCase()); } } catch {}
 
 function go(tab) {
-  keys.clear(); currentTab = tab;
-  if (isOwner() && state.armed) void safeDisarm();
+  setTouchExpanded(false);
+  clearInput(); currentTab = tab;
+  if (isOwner() && (state.armed || outputBusy)) void safeDisarm();
   for (const element of document.querySelectorAll('.tab-panel')) element.hidden = element.id !== tab;
   for (const element of document.querySelectorAll('[data-tab]')) element.classList.toggle('active', element.dataset.tab === tab);
   text('page-title', { pilot: 'Пилотирование', controls: 'Управление', system: 'Аппарат и пакеты', journal: 'Журнал' }[tab]);
@@ -126,7 +135,7 @@ const timestamp = () => new Date().toISOString().replaceAll(':', '-').slice(0, 1
 function exportSession() { download('arctica-session-' + timestamp() + '.json', { version: 1, mode: 'simulator', started: new Date(started).toISOString(), exported: new Date().toISOString(), vehicle: state?.vehicle, profile, events: [...recordedEvents.values()], samples }); toast('Скачан журнал с телеметрией и пакетами. Видео в экспорт не входит.'); }
 $('export-session').onclick = exportSession;
 $('export-log').onclick = () => download('arctica-events-' + timestamp() + '.json', [...recordedEvents.values()]);
-$('mark-button').onclick = () => { if (!isOwner()) return toast('Отметки добавляет оператор'); $('mark-dialog').showModal(); $('mark-text').focus(); };
+$('mark-button').onclick = () => { if (!isOwner()) return toast('Отметки добавляет оператор'); clearInput(); $('mark-dialog').showModal(); $('mark-text').focus(); };
 $('cancel-mark').onclick = () => $('mark-dialog').close();
 $('mark-form').onsubmit = async event => { event.preventDefault(); try { await api('mark', { epoch: state.epoch, text: $('mark-text').value }); $('mark-dialog').close(); $('mark-text').value = ''; toast('Отметка добавлена'); } catch {} };
 async function ownershipAction(action, data = {}) {
@@ -141,11 +150,11 @@ $('reject-takeover').onclick = () => ownershipAction('respond', { accept: false,
 async function outputOperation(action, quiet = false) {
   if (outputBusy || !isOwner()) return;
   const operation = ++outputAction, epoch = state.epoch, safetyEpoch = state.safetyEpoch; outputBusy = true;
-  keys.clear(); inputMapper.reset(); commandAbort?.abort(); render();
+  keys.clear(); inputMapper.reset(); if (action === 'disarm') touchControls.reset(); commandAbort?.abort(); render();
   try {
     if (action !== 'disarm') {
       // Use actual stick/button values when checking neutral; never mask held input.
-      const actualInput = inputMapper.sample(profile, { keys, pad: gamepad(), allowToggles: false });
+      const actualInput = inputMapper.sample(profile, { keys, pad: gamepad(), touch: touchControls.sample(), allowToggles: false });
       await api('command', { ...commandContext(state, ++seq), ...actualInput });
       if (operation !== outputAction || !isOwner() || state.epoch !== epoch) return;
       if (state.safetyEpoch !== safetyEpoch) { toast('Состояние выходов изменилось. Проверьте остановку и повторите действие.'); return; }
@@ -153,15 +162,29 @@ async function outputOperation(action, quiet = false) {
     await api(action, { epoch, safetyEpoch }, { quiet });
   } catch {} finally { if (operation === outputAction) { outputBusy = false; render(); } }
 }
-async function safeDisarm() { return outputOperation('disarm', true); }
+async function safeDisarm() {
+  // A page leaving the pilot view must cancel even an arm operation in flight.
+  if (outputBusy) { ++outputAction; outputBusy = false; commandAbort?.abort(); }
+  return outputOperation('disarm', true);
+}
 $('arm').onclick = () => outputOperation(state?.armed ? 'disarm' : 'arm');
 $('reset').onclick = () => outputOperation('reset');
 async function emergency() {
   if (!token) return;
-  const operation = ++outputAction; outputBusy = true; keys.clear(); inputMapper.reset(); commandAbort?.abort();
+  const operation = ++outputAction; outputBusy = true; clearInput(); commandAbort?.abort();
   try { await api('estop', {}); } catch {} finally { if (operation === outputAction) { outputBusy = false; render(); } }
 }
 $('estop').onclick = emergency;
+$('touch-estop').onclick = emergency;
+$('touch-arm').onclick = () => outputOperation(state?.armed ? 'disarm' : 'arm');
+$('touch-reset').onclick = () => outputOperation('reset');
+function setTouchExpanded(expanded) {
+  if (document.body.classList.contains('touch-expanded') === expanded) return;
+  clearInput(); if (isOwner() && (state.armed || outputBusy)) void safeDisarm();
+  document.body.classList.toggle('touch-expanded', expanded);
+  text('touch-expand', expanded ? 'Свернуть' : 'Развернуть пульт');
+}
+$('touch-expand').onclick = () => setTouchExpanded(!document.body.classList.contains('touch-expanded'));
 $('light-toggle').onclick = () => { if (isOwner() && state.armed) inputMapper.toggle('light'); };
 $('fullscreen').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else $('viewport').requestFullscreen().catch(() => toast('Полный экран недоступен')); };
 $('camera-image').onerror = () => { text('stream-status', 'Нет изображения с камеры'); toast('Поток камеры недоступен. Проверьте CAMERA_URL на верхнем блоке.'); };
@@ -170,10 +193,11 @@ function bindCapture(button, apply) {
   button.onclick = () => {
     if (!editable()) return;
     if (capture) { capture.button.classList.remove('capturing'); renderProfile(); }
-    keys.clear(); capture = { button, apply }; button.textContent = 'Нажмите…'; button.classList.add('capturing');
+    clearInput(); capture = { button, apply }; button.textContent = 'Нажмите…'; button.classList.add('capturing');
   };
 }
 function renderProfile() {
+  clearInput();
   $('device').value = profile.device; $('sensitivity').value = profile.sensitivity * 100;
   text('sensitivity-value', Math.round(profile.sensitivity * 100) + '%');
   $('deadzone').value = profile.deadzone * 100; text('deadzone-value', Math.round(profile.deadzone * 100) + '%');
@@ -206,10 +230,14 @@ function renderHints() {
     for (const key of ['negative', 'positive']) { const k = document.createElement('kbd'); k.textContent = readableKey(profile.bindings[id][key]); span.append(k); }
     span.append(' ' + label); hints.append(span);
   }
-  text('deadman-label', profile.device === 'keyboard' ? readableKey(profile.deadmanKey) : 'B' + profile.deadmanButton);
+  const touch = profile.device === 'touch';
+  if (!touch) setTouchExpanded(false);
+  document.body.classList.toggle('touch-mode', touch); $('touch-controls').hidden = !touch;
+  hints.hidden = touch;
+  text('deadman-label', touch ? 'стик / кнопку' : profile.device === 'keyboard' ? readableKey(profile.deadmanKey) : 'B' + profile.deadmanButton);
 }
 for (const [id, key] of [['sensitivity', 'sensitivity'], ['deadzone', 'deadzone'], ['expo', 'expo']]) $(id).oninput = () => { if (!editable()) return renderProfile(); profile[key] = Number($(id).value) / 100; saveProfile(); text(id + '-value', Math.round(profile[key] * 100) + '%'); };
-$('device').onchange = () => { if (!editable()) return renderProfile(); profile.device = $('device').value; keys.clear(); inputMapper.reset(); saveProfile(); renderHints(); };
+$('device').onchange = () => { if (!editable()) return renderProfile(); profile.device = $('device').value; clearInput(); saveProfile(); renderHints(); };
 $('deadman-button').onchange = () => { if (!editable()) return renderProfile(); const n = Number($('deadman-button').value); if (!Number.isInteger(n) || n < 0 || n > 63) { toast('Укажите индекс 0–63'); return renderProfile(); } profile.deadmanButton = n; saveProfile(); };
 $('export-profile').onclick = () => download('arctica-controls.json', profile);
 $('import-profile').onclick = () => { if (editable()) $('profile-file').click(); };
@@ -230,12 +258,18 @@ window.addEventListener('keydown', event => {
   if (used) event.preventDefault();
 });
 window.addEventListener('keyup', event => keys.delete(event.code));
-window.addEventListener('blur', () => { keys.clear(); if (isOwner() && state.armed) void safeDisarm(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) { keys.clear(); if (isOwner()) void safeDisarm(); } });
+window.addEventListener('blur', () => { clearInput(); if (isOwner() && (state.armed || outputBusy)) void safeDisarm(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { clearInput(); if (isOwner()) void safeDisarm(); } });
 window.addEventListener('gamepaddisconnected', () => { if (profile.device === 'gamepad' && isOwner()) void safeDisarm(); });
+window.addEventListener('pagehide', () => { clearInput(); if (isOwner()) void safeDisarm(); });
+let inputWidth = window.innerWidth;
+window.addEventListener('resize', () => {
+  const changed = inputWidth !== window.innerWidth; inputWidth = window.innerWidth;
+  if (profile.device === 'touch' && (changed || touchControls.sample().deadman)) { touchControls.reset(); if (isOwner() && (state.armed || outputBusy)) void safeDisarm(); }
+});
 function gamepad() { try { return [...(navigator.getGamepads?.() || [])].find(Boolean); } catch { return null; } }
 function readInput() {
-  return inputMapper.sample(profile, { keys, pad: gamepad(),
+  return inputMapper.sample(profile, { keys, pad: gamepad(), touch: touchControls.sample(),
     active: currentTab === 'pilot' && !document.hidden && document.hasFocus() && !capture && !document.querySelector('dialog[open]'),
     allowToggles: isOwner() && state.armed });
 }
@@ -249,6 +283,12 @@ for (let i = 0; i < 6; i++) { const row = document.createElement('div'); row.cla
 function render() {
   if (!state) return;
   const t = state.telemetry, owner = isOwner(), ready = state.armed && owner;
+  touchControls.setEnabled(profile.device === 'touch' && owner && !state.estop);
+  $('touch-expand').disabled = outputBusy;
+  $('touch-arm').disabled = !owner || state.estop || outputBusy; text('touch-arm', state.armed ? 'Выключить выходы' : 'Включить выходы');
+  $('touch-reset').hidden = !state.estop || !owner; $('touch-reset').disabled = outputBusy;
+  $('touch-light').disabled = !ready; $('touch-light').classList.toggle('on', !!t.light); $('touch-light').setAttribute('aria-pressed', String(!!t.light));
+  text('touch-help', !owner ? 'Получите управление, чтобы пользоваться пультом.' : state.estop ? 'Аварийный стоп. Сбросьте его и включите выходы заново.' : !state.armed ? 'Отпустите стики и кнопки, затем включите выходы.' : 'Удерживайте стики или кнопки. Отпустите — движение остановится.');
   for (const id of ['depth', 'pitch', 'roll', 'voltage', 'current', 'temperature']) text(id, t[id].toFixed(id === 'depth' ? 2 : 1));
   text('yaw', String(Math.round(t.yaw) % 360).padStart(3, '0')); $('compass').querySelector('i').style.transform = `rotate(${t.yaw}deg)`;
   $('battery-fill').style.width = Math.max(0, Math.min(100, (t.voltage - 12) / 4.8 * 100)) + '%';
@@ -301,7 +341,7 @@ setInterval(async () => {
 }, 500);
 setInterval(() => {
   if (connected && performance.now() - lastStateAt > 500) { setConnection(false); streamAbort?.abort(); reconnectTimer = setTimeout(connect, 100); }
-  const pad = gamepad(); text('device-status', profile.device === 'keyboard' ? 'Клавиатура готова' : pad ? 'Геймпад подключён' : !window.isSecureContext ? 'Для геймпада нужен HTTPS или localhost' : 'Подключите геймпад и нажмите кнопку');
+  const pad = gamepad(); text('device-status', profile.device === 'touch' ? 'Экранный пульт готов · удерживайте стики' : profile.device === 'keyboard' ? 'Клавиатура готова' : pad ? 'Геймпад подключён' : !window.isSecureContext ? 'Для геймпада нужен HTTPS или localhost' : 'Подключите геймпад и нажмите кнопку');
   text('pad-name', pad ? pad.id : 'Подключите геймпад и нажмите на нём кнопку.');
   text('pad-values', pad ? 'Оси: ' + pad.axes.map((n, i) => `A${i} ${n.toFixed(2)}`).join(' · ') + '\nКнопки: ' + pad.buttons.map((b, i) => b.pressed ? 'B' + i : '').filter(Boolean).join(', ') : '');
   const elapsed = Math.floor((Date.now() - started) / 1000); const time = [Math.floor(elapsed / 3600), Math.floor(elapsed / 60) % 60, elapsed % 60].map(v => String(v).padStart(2, '0')).join(':');
