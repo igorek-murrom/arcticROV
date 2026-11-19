@@ -94,7 +94,10 @@ export class Controller {
     this.validateCommand(data); this.touch(id);
     this.seq = data.seq; this.lastCommand = this.now(); this.leaseUntil = this.now() + 2000;
     this.inputNeutral = axisActions.every(a => Math.abs(data.values[a.id]) < 0.02) && !data.deadman;
-    this.values = this.armed && !this.estop && data.deadman ? { ...data.values } : neutral();
+    this.values = neutral();
+    if (this.armed && !this.estop) {
+      for (const action of actions) if (action.kind === 'toggle' || data.deadman) this.values[action.id] = data.values[action.id];
+    }
     this.lastDeadman = data.deadman;
   }
   arm(id, epoch, safetyEpoch) {

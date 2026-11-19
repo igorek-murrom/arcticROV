@@ -84,3 +84,28 @@ test('simulated lower controller rejects expired or stopped packets independentl
   sim.received -= 1000; sim.step(1); assert.equal(sim.telemetry().depth, .7);
   sim.apply({ ...packet, estop: true }); sim.step(1); assert.equal(sim.telemetry().depth, .7);
 });
+
+test('light works without deadman while all motion stays neutral and safety stops extinguish it', () => {
+  const { c, arm, command, advance } = fixture();
+  command({ light: 1 }); assert.deepEqual(c.packet().actions, neutral());
+  const lit = () => { arm(); command({ light: 1, surge: 1, heave: -1, cameraTilt: 1, grip: 1, wrist: 1 });
+    const p = c.packet(); assert.equal(p.deadman, false); assert.deepEqual(p.actions, { ...neutral(), light: 1 }); assert.ok(p.thrusters.every(v => v === 0)); };
+  lit(); command({ light: 0 }); assert.equal(c.packet().actions.light, 0);
+  command({ light: 1 }); c.disarm('alice'); assert.deepEqual(c.packet().actions, neutral());
+  lit(); advance(351); assert.equal(c.armed, false); assert.deepEqual(c.packet().actions, neutral());
+  lit(); c.streamClosed('alice'); assert.deepEqual(c.packet().actions, neutral());
+  lit(); c.takeover('bob'); c.respond('alice', true, c.request.requestId); assert.deepEqual(c.packet().actions, neutral());
+});
+
+test('lower simulator permits light without deadman but independently blocks every motion axis', () => {
+  const sim = new Simulator(), packet = { armed: true, estop: false, deadman: false, ttlMs: 350,
+    actions: { ...neutral(), light: 1, heave: -1, surge: 1, yaw: 1, cameraTilt: 1, grip: 1, wrist: 1 } };
+  const original = structuredClone(packet);
+  sim.apply(packet); sim.step(1);
+  let s = sim.telemetry(); assert.equal(s.light, 1); assert.equal(s.depth, 0); assert.equal(s.y, 0); assert.equal(s.yaw, 0);
+  assert.equal(s.cameraTilt, 0); assert.equal(s.grip, .5); assert.equal(s.wrist, 0); assert.deepEqual(packet, original);
+  sim.received -= 1000; sim.step(.1); assert.equal(sim.telemetry().light, 0);
+  for (const stopped of [{ armed: false }, { estop: true }]) {
+    sim.apply({ ...packet, ...stopped }); sim.step(.1); assert.equal(sim.telemetry().light, 0);
+  }
+});

@@ -1,3 +1,5 @@
+import { axisActions } from './actions.mjs';
+
 // Portable simulator: used by the upper station and by the browser-only Pages demo.
 export class Simulator {
   constructor() {
@@ -7,7 +9,9 @@ export class Simulator {
   step(dt) {
     const s = this.state; const p = this.packet;
     // Simulated lower-controller watchdog, independent of the upper controller.
-    const a = p && p.armed && p.deadman && !p.estop && performance.now() - this.received < p.ttlMs ? p.actions : {};
+    const a = p && p.armed && !p.estop && performance.now() - this.received < p.ttlMs ? { ...p.actions } : {};
+    // The lower adapter gates motion independently; toggled lights need no held permission.
+    if (!p?.deadman) for (const { id } of axisActions) a[id] = 0;
     s.depth = Math.max(0, s.depth - (a.heave || 0) * dt * 0.7);
     s.yaw = (s.yaw + (a.yaw || 0) * dt * 40 + 360) % 360;
     const r = s.yaw * Math.PI / 180;

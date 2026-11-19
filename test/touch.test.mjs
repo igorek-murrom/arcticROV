@@ -54,13 +54,39 @@ test('touch profiles round-trip and mapping applies sensitivity, dead zone and e
   touch.reset(); assert.deepEqual(mapper.sample(profile, { touch: touch.sample() }), { values: neutral(), deadman: false });
 });
 
-test('light contact authorizes equipment only while held; disabled toggles and reset clear it', () => {
+test('light is a latched toggle without a held contact and never grants motion permission', () => {
   const touch = new TouchInput(), mapper = new InputMapper(), profile = defaultProfile(); profile.device = 'touch';
-  touch.press(1, 'light'); mapper.toggle('light');
-  assert.deepEqual(mapper.sample(profile, { touch: touch.sample() }), { values: { ...neutral(), light: 1 }, deadman: true });
-  touch.release(1); assert.equal(mapper.sample(profile, { touch: touch.sample() }).deadman, false);
-  assert.equal(mapper.sample(profile, { touch: touch.sample(), allowToggles: false }).values.light, 0);
+  assert.equal(touch.press(1, 'light'), false);
+  mapper.toggle('light');
+  for (let i = 0; i < 4; i++) assert.deepEqual(mapper.sample(profile, { touch: touch.sample() }), { values: { ...neutral(), light: 1 }, deadman: false });
+  touch.press(2, 'move'); touch.move(2, 0, -1); touch.release(2);
+  assert.equal(mapper.sample(profile, { touch: touch.sample() }).values.light, 1);
+  mapper.toggle('light'); assert.equal(mapper.sample(profile, { touch: touch.sample() }).values.light, 0);
+  mapper.toggle('light'); assert.equal(mapper.sample(profile, { touch: touch.sample(), allowToggles: false }).values.light, 0);
   mapper.reset(); assert.equal(mapper.sample(profile, { touch: touch.sample() }).values.light, 0);
+});
+
+test('one light toggle survives idle packets and released sticks in the Pages station', () => {
+  let now = 1000, seq = 0;
+  const demo = new DemoStation(() => now), mapper = new InputMapper(), touch = new TouchInput(), profile = defaultProfile(); profile.device = 'touch';
+  const user = demo.request('login', { name: 'Свет', pin: 1 }).body;
+  const request = (path, data = {}) => demo.request(path, data, user.token);
+  const state = () => request('state').body;
+  const command = () => request('command', { ...commandContext(state(), ++seq), ...mapper.sample(profile, { touch: touch.sample() }) });
+  request('claim'); command();
+  request('arm', { epoch: state().epoch, safetyEpoch: state().safetyEpoch });
+  mapper.toggle('light');
+  for (let i = 0; i < 10; i++) {
+    assert.equal(command().status, 200); now += 100; demo.step(.1);
+    assert.equal(state().telemetry.light, 1); assert.equal(state().packet.deadman, false);
+    assert.ok(state().packet.thrusters.every(v => v === 0));
+  }
+  touch.press(1, 'move'); touch.move(1, 0, -1); command(); now += 100; demo.step(.1);
+  touch.release(1); command(); now += 100; demo.step(.1);
+  assert.equal(state().telemetry.light, 1); assert.ok(state().packet.thrusters.every(v => v === 0));
+  mapper.toggle('light'); command(); demo.step(.05); assert.equal(state().telemetry.light, 0);
+  mapper.toggle('light'); command(); demo.step(.05); assert.equal(state().telemetry.light, 1);
+  request('estop'); demo.step(.05); assert.equal(state().telemetry.light, 0); assert.equal(state().owner.id, user.id);
 });
 
 test('touch drives the same station, refuses arming while held, and stop preserves the operator', () => {

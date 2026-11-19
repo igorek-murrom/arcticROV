@@ -26,8 +26,7 @@ let keys = new Set(), capture = null, sending = false, cameraConfigured = null;
 const inputMapper = new InputMapper();
 const touchControls = createTouchControls($('touch-controls'), {
   allowed: () => profile.device === 'touch' && isOwner() && !outputBusy && currentTab === 'pilot' && !document.hidden && !document.querySelector('dialog[open]') && !state.estop,
-  onCancel: () => { if (isOwner() && (state.armed || outputBusy)) void safeDisarm(); },
-  onPress: control => { if (control === 'light' && state.armed) inputMapper.toggle('light'); }
+  onCancel: () => { if (isOwner() && (state.armed || outputBusy)) void safeDisarm(); }
 });
 function clearInput() { keys.clear(); inputMapper.reset(); touchControls.reset(); }
 let currentTab = 'pilot', streamAbort = null, commandAbort = null, reconnectTimer = null, toastTimer;
@@ -185,7 +184,9 @@ function setTouchExpanded(expanded) {
   text('touch-expand', expanded ? 'Свернуть' : 'Развернуть пульт');
 }
 $('touch-expand').onclick = () => setTouchExpanded(!document.body.classList.contains('touch-expanded'));
-$('light-toggle').onclick = () => { if (isOwner() && state.armed) inputMapper.toggle('light'); };
+function toggleLight() { if (isOwner() && state.armed && !outputBusy) inputMapper.toggle('light'); }
+$('light-toggle').onclick = toggleLight;
+$('touch-light').onclick = toggleLight;
 $('fullscreen').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else $('viewport').requestFullscreen().catch(() => toast('Полный экран недоступен')); };
 $('camera-image').onerror = () => { text('stream-status', 'Нет изображения с камеры'); toast('Поток камеры недоступен. Проверьте CAMERA_URL на верхнем блоке.'); };
 
@@ -288,6 +289,7 @@ function render() {
   $('touch-arm').disabled = !owner || state.estop || outputBusy; text('touch-arm', state.armed ? 'Выключить выходы' : 'Включить выходы');
   $('touch-reset').hidden = !state.estop || !owner; $('touch-reset').disabled = outputBusy;
   $('touch-light').disabled = !ready; $('touch-light').classList.toggle('on', !!t.light); $('touch-light').setAttribute('aria-pressed', String(!!t.light));
+  text('touch-light', t.light ? '☼ Свет включён' : '☼ Свет выключен');
   text('touch-help', !owner ? 'Получите управление, чтобы пользоваться пультом.' : state.estop ? 'Аварийный стоп. Сбросьте его и включите выходы заново.' : !state.armed ? 'Отпустите стики и кнопки, затем включите выходы.' : 'Удерживайте стики или кнопки. Отпустите — движение остановится.');
   for (const id of ['depth', 'pitch', 'roll', 'voltage', 'current', 'temperature']) text(id, t[id].toFixed(id === 'depth' ? 2 : 1));
   text('yaw', String(Math.round(t.yaw) % 360).padStart(3, '0')); $('compass').querySelector('i').style.transform = `rotate(${t.yaw}deg)`;
@@ -295,7 +297,7 @@ function render() {
   text('hud-heading', String(Math.round(t.yaw) % 360).padStart(3, '0') + '°'); text('hud-depth', t.depth.toFixed(1) + ' м');
   text('hud-position', `X ${t.x.toFixed(1)} / Y ${t.y.toFixed(1)}`); text('hud-tilt', 'КАМЕРА ' + Math.round(t.cameraTilt) + '°');
   text('camera-tilt', Math.round(t.cameraTilt) + '°'); text('grip', Math.round(t.grip * 100) + '%'); text('wrist', Math.round(t.wrist) + '°');
-  $('light-toggle').classList.toggle('on', !!t.light); $('light-toggle').setAttribute('aria-pressed', String(!!t.light)); $('light-toggle').disabled = !ready;
+  $('light-toggle').classList.toggle('on', !!t.light); $('light-toggle').setAttribute('aria-pressed', String(!!t.light)); $('light-toggle').setAttribute('aria-label', t.light ? 'Выключить освещение' : 'Включить освещение'); $('light-toggle').disabled = !ready;
   text('participant-count', state.clients.length + ' в сети');
   text('ownership-title', owner ? 'Вы управляете аппаратом' : state.owner ? 'Идёт управление · ' + state.owner.name : 'Управление свободно');
   text('ownership-description', owner ? state.reason : state.owner ? 'Вы наблюдаете. Можно запросить передачу управления.' : 'Получите управление для начала работы');

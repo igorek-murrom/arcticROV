@@ -1,6 +1,6 @@
 import { TouchInput } from './shared/touch-input.mjs';
 
-export function createTouchControls(root, { allowed, onCancel, onPress }) {
+export function createTouchControls(root, { allowed, onCancel }) {
   const input = new TouchInput(), held = new Map();
   const controls = [...root.querySelectorAll('[data-touch-control]')];
   function paint(element, x = 0, y = 0) {
@@ -29,7 +29,6 @@ export function createTouchControls(root, { allowed, onCancel, onPress }) {
       if (!input.press(event.pointerId, element.dataset.touchControl)) return;
       held.set(event.pointerId, element); element.setPointerCapture(event.pointerId); move(event, element);
       if (!element.classList.contains('touch-stick')) paint(element);
-      onPress?.(element.dataset.touchControl);
     });
     element.addEventListener('pointermove', event => {
       if (held.get(event.pointerId) !== element) return;

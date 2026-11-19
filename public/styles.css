@@ -78,3 +78,12 @@ body.touch-expanded{overflow:hidden}
   .touch-expanded .touch-panel{overflow:auto}
   .touch-expanded .touch-stick{width:min(100%,30vh)}
 }
+
+@media(max-width:650px){
+  .touch-mode:not(.touch-expanded) .touch-toolbar h2{display:none}
+  .touch-mode:not(.touch-expanded) .touch-toolbar{gap:6px}
+  .touch-mode:not(.touch-expanded) .touch-toolbar #touch-expand{width:44px;min-width:44px;padding:0;font-size:0}
+  .touch-mode:not(.touch-expanded) .touch-toolbar #touch-expand:before{content:'⛶';font-size:24px}
+  .touch-mode:not(.touch-expanded) .touch-toolbar .arm-button{font-size:12px;padding:8px;min-width:0;flex:1}
+  .touch-mode:not(.touch-expanded) .touch-toolbar .danger{font-size:12px;padding:8px}
+}

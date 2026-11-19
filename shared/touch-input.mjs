@@ -10,7 +10,7 @@ export class TouchInput {
   press(pointer, control) {
     if (this.contacts.has(pointer) || [...this.contacts.values()].some(c => c.control === control)) return false;
     const [axis, sign] = control.split(':');
-    if (control !== 'light' && !sticks[control] && !(equipment.has(axis) && ['-1', '1'].includes(sign))) return false;
+    if (!sticks[control] && !(equipment.has(axis) && ['-1', '1'].includes(sign))) return false;
     this.contacts.set(pointer, { control, x: 0, y: 0 });
     return true;
   }
@@ -27,7 +27,7 @@ export class TouchInput {
       if (sticks[c.control]) {
         const [horizontal, vertical] = sticks[c.control];
         values[horizontal] = c.x; values[vertical] = -c.y || 0;
-      } else if (c.control !== 'light') {
+      } else {
         const [axis, sign] = c.control.split(':'); values[axis] += Number(sign);
       }
     }
